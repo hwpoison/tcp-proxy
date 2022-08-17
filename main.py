@@ -14,7 +14,8 @@ class ProxyClient(Thread):
         print(f"[+] Proxy client initialized for {self.ip}:{self.port}")
         if self.port == 443:
             print("[+] Initializing SSL context")
-            self.ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            self.ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS)
+            #self.ssl_context.load_cert_chain(certfile="./server.crt",keyfile="./server.key")
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.socket = self.ssl_context.wrap_socket(self.socket, server_hostname="localhost")
             self.socket.connect((self.ip, self.port))
@@ -35,7 +36,7 @@ class ProxyClient(Thread):
                 self.socket.close()
                 break
 
-def UserThread(client, to_host, to_port):
+def UserThread(client, port, to_host, to_port):
     # Once we have a connection, we can start proxying in a new thread
     client_proxy = ProxyClient(to_host, to_port)
 
@@ -46,8 +47,13 @@ def UserThread(client, to_host, to_port):
     while True:
         # When the proxy server receives user request data 
         request = client.recv(2048)
-        print(f"[+] The client is send:\n{'='*20}\n {request}\n {'='*20}\n")
+        # replace http header origin with host address
         if request:
+            if to_port == 80 or to_port == 443:
+                request = request.replace(bytes(f"Host: {socket.getfqdn('127.0.0.1')}:{port}", 'utf-8'), 
+                                          bytes(f'Host: {to_host}', 'utf-8') )
+
+            print(f"[+] The client is send:\n{'='*20}\n {request}\n {'='*20}\n")
             # Send the data to the target server though the proxy client
             client_proxy.socket.sendall(request)
         else:
@@ -62,14 +68,10 @@ class Proxy(Thread):
         self.port = port
 
         # Proxy client
-        self.to_host = self.get_host(to_host)
+        self.to_host = to_host
         self.to_port = to_port
 
         self.max_connections = 5
-
-    def get_host(self, host):
-        resolve = socket.gethostbyname_ex(host)
-        return resolve[2][0]
 
     def run(self):
         print(f"Proxy listening on {self.host}:{self.port}")
@@ -89,7 +91,7 @@ class Proxy(Thread):
             (client, (ip,port)) = serversocket.accept()
             print("[+] {ip}:{port} is connected to proxy-server".format(ip=ip, port=port))
             # Start new thread for each client
-            Thread(target=UserThread, args=(client, self.to_host, self.to_port)).start()
+            Thread(target=UserThread, args=(client, self.port, self.to_host, self.to_port)).start()
 
 
 # ::: About sockets  :::
@@ -97,11 +99,11 @@ class Proxy(Thread):
 # In each response someone wait for the other to send data.
 # |
 # |\
-# | -> Socket server:
+# |  -> Socket server:
 # |         *A server bind to localhost:<someport> and wait connections from the client.
 # |          When a connection is established, the server will forward data.
 # |\
-#   -> Socket client
+#    -> Socket client
 #           *A client connect to localhost:<someport> and send data to the server waiting for a response.
 
 
@@ -111,5 +113,5 @@ class Proxy(Thread):
 #                                                  |
 # User <- Proxy server <- Proxy client <- Server <-/
 if __name__ == "__main__":
-    server = Proxy("", 8081, "www.unq.edu.ar", 80)
+    server = Proxy("", 8081, "www.youtube.com", 443)
     server.start()
